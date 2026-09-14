@@ -14,6 +14,7 @@
     "verify:merge": "node --experimental-strip-types scripts/verify-merge.ts",
     "verify:preview": "node --experimental-strip-types scripts/verify-preview.ts",
     "verify:limits": "node --experimental-strip-types scripts/verify-limits.ts",
+    "smoke:heavy": "node --experimental-strip-types scripts/smoke-heavy-merge.ts",
     "verify": "npm run verify:merge && npm run verify:preview && npm run verify:limits"
   },
   "dependencies": {

@@ -19,39 +19,27 @@ Open [http://localhost:3000](http://localhost:3000). Drop or choose at least two
 
 Client-only smoke: 2–3 small PDFs. You should not see `/api/blob` traffic.
 
-## Heavy merge setup (optional until Blob exists)
+## Heavy merge (Vercel Blob + Workflows)
 
-Heavy merge is disabled until Blob credentials are present (`GET /api/merge/health` → `{ "enabled": false }`).
-
-1. In the Vercel project, Storage → Create Database → **Blob** → **Private**.
-2. Connect the store to this project. Include **Development** if you will pull env locally.
-3. Pull secrets (never commit them):
-
-```bash
-vercel env pull .env.local --yes
-```
-
-4. Confirm `.env.local` includes:
+Blob store **pdf-combine-blob** is connected. `GET /api/merge/health` is `{ "enabled": true }` on Preview/Production.
 
 | Variable | Why |
 | --- | --- |
 | `BLOB_READ_WRITE_TOKEN` | Required. Signs browser upload tokens (`handleUpload`). OIDC cannot do this. |
-| `BLOB_STORE_ID` | Server `get`/`put` with OIDC. |
-| `VERCEL_OIDC_TOKEN` | Vercel / `vercel env pull`. Workflows use this. Expires ~12h locally. |
+| `BLOB_STORE_ID` | Server `get`/`put` with OIDC (`store_hSXUsRUrLNOmzqZt`). |
+| `VERCEL_OIDC_TOKEN` | Automatic on Vercel. Locally: `vercel env pull .env.local --yes` (~12h). |
 
-There are **no Trigger.dev keys**. Workflows run on the existing Vercel project.
+There are **no Trigger.dev keys**. Workflows run on this Vercel project.
 
-Template: [.env.example](./.env.example).
+Local UI with two tiny files: [http://localhost:3000/?spikeHeavy=1](http://localhost:3000/?spikeHeavy=1) after pulling env.
 
-Simulated heavy job with two tiny files: [http://localhost:3000/?spikeHeavy=1](http://localhost:3000/?spikeHeavy=1).
-
-Inspect workflow runs:
+Against a preview deployment:
 
 ```bash
-npx workflow web
-# or
-npx workflow inspect runs
+SPIKE_BASE_URL="https://<preview>.vercel.app" SPIKE_FILE_COUNT=24 npm run smoke:heavy
 ```
+
+Inspect runs: `npx workflow web` or `npx workflow inspect runs`.
 
 ## Build
 

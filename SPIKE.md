@@ -1,6 +1,6 @@
 # SPIKE — Vercel Workflows heavy merge
 
-Research + prototype, not a production hybrid ship. Do not merge until Ship/Brice provision Blob and smoke a real 50–400 file job.
+Research + prototype, not a production hybrid ship. Do not merge until a phone-class 395-file job is smoked.
 
 ## What broke at ~395 files (Samsung / mobile Chrome)
 
@@ -27,7 +27,7 @@ A phone-class Chrome tab cannot hold hundreds of decoded PDFs. **Client-only mer
 ## Prototype architecture
 
 ```
-phone                    Vercel                         Blob
+phone                    Vercel                         Blob (pdf-combine-blob)
 ─────                    ──────                         ────
 batch upload (2 at a time) ──► handleUpload token ──► private jobs/{id}/sources/*
 POST /api/merge/start ──► Workflow mergePdfsWorkflow
@@ -38,95 +38,91 @@ poll GET /api/merge/{runId}  (progress.json + run.status)
 GET /api/merge/download?jobId=  → stream combined.pdf, delete ~15s later
 ```
 
-- Uploads never go through the Next.js body (Blob client upload, up to multi-GB per file).
+- Uploads never go through the Next.js body (Blob client upload).
 - Merge is **not** one serverless timeout: `HEAVY_MERGE_CHUNK_SIZE = 8` files per `"use step"`.
-- Progress is a private `progress.json` blob (polling-friendly on mobile; SSE can die in background tabs).
+- Progress is a private `progress.json` blob (polling-friendly on mobile).
 - Workflows also write the default stream for `npx workflow web`.
 
-## What worked in this spike (without Blob credentials)
+## Live results (after Blob was connected)
 
-- Client merge of 25 empty PDFs via chunked `copyPages` + `yieldToEventLoop` (`npm run verify`).
-- Path decision: 2 files → client; 20 files / 32 MB / 395 files → heavy.
-- Typecheck + production build with `withWorkflow()`.
-- UI: lazy thumbs (viewport + 1-at-a-time queue), skip thumbs on heavy jobs, progress copy, privacy alert.
+Store: **pdf-combine-blob** (`store_hSXUsRUrLNOmzqZt`) on project **pdf-combine**. `BLOB_READ_WRITE_TOKEN` is set for Development, Preview, and Production.
 
-## What this environment could not prove live
+Preview (`GET /api/merge/health`) returned `{ "enabled": true }`.
 
-No `BLOB_READ_WRITE_TOKEN` is in this repo (do not invent secrets). End-to-end heavy merge needs Brice/Ship to create a **private** Blob store on the existing Vercel project and pull env vars. Then smoke with `?spikeHeavy=1` and two tiny PDFs, then 25 files, then ~400.
+Against that preview we ran `scripts/smoke-heavy-merge.ts` (empty 1-page PDFs, client upload → workflow → download):
 
-## Limits we measured / inferred
+| Files | Workflow run | Result | Wall time |
+| --- | --- | --- | --- |
+| 2 | `wrun_01M2G6X2ABETC43M7DWEP3HETR` | 2 pages downloaded | ~11s |
+| 24 | `wrun_01M2G6Y7BNEAAY1APPXP3NGNX2` | 24 pages (3 merge steps) | ~13s |
+| 48 | `wrun_01M2G6Z98WQ3Z90MX0XB9TQZ9N` | 48 pages (6 merge steps) | ~32s |
+
+Runtime logs show `/api/blob/upload`, `/api/merge/start`, `/.well-known/workflow/v1/step` + `flow`, poll, and `/api/merge/download` all 200. Chunked steps are real, not one giant function.
+
+Not yet live: a **Samsung Chrome** run with ~395 *real* files (upload bandwidth + pdf-lib memory on scanned pages). Empty 395-file jobs should follow the same step loop (~50 steps of 8).
+
+## Limits
 
 | Limit | Value | Notes |
 | --- | --- | --- |
 | Client file count | 20 | Below this, sequential pdf-lib + yield is the default |
-| Client total size | 32 MB | Below 25–50 MB band; phones still OOM if each file is huge |
+| Client total size | 32 MB | Phones still OOM if each file is huge |
 | Heavy file cap (schema) | 500 | Covers the 395-file Samsung target |
-| Upload concurrency | 2 | Keeps mobile from opening 395 XHRs |
-| Files per workflow step | 8 | Stays inside Function time/memory better than 395-in-one |
+| Upload concurrency | 2 | UI path; smoke script is sequential |
+| Files per workflow step | 8 | 48 files = 6 steps, all succeeded |
 | Step timeout | 300s | `vercel.json` + platform default |
-| Blob client upload | needs `BLOB_READ_WRITE_TOKEN` | OIDC is **not** enough for `handleUpload` |
-| Server get/put | OIDC (`BLOB_STORE_ID` + `VERCEL_OIDC_TOKEN`) or the same static token | |
+| Blob client upload | `BLOB_READ_WRITE_TOKEN` | Confirmed required; OIDC is not enough for `handleUpload` |
 | Result TTL | 1 hour | Cleanup workflow `sleep("1 hour")` then `list+del` prefix |
 | Download cleanup | ~15s after stream | Avoids deleting while the PDF is still downloading |
-| pdf-lib on the server | still in-memory | 395 *tiny* PDFs should work; 395 full-page scans may still OOM the step. Then split further or switch merge tool |
-| Auth | **none** | Anyone who can hit `/api/blob/upload` can upload under a UUID they minted. Production must add auth or a signed job token |
-| Thumbnails | lazy, 96px, canvas edge ≤ 2048 | Android canvas limits; never pre-render 395 first pages |
+| pdf-lib on the server | still in-memory | Empty PDFs are cheap; 395 full-page scans may still OOM a step |
+| Auth | **none** | UUID job prefix only. Production must add auth |
+| Thumbnails | lazy, 96px, canvas edge ≤ 2048 | Never pre-render 395 first pages |
 
 ## Go / no-go
 
 | Option | Verdict |
 | --- | --- |
-| Stay **client-only** for 395 Samsung files | **No-go.** The tab will freeze and die. Hardening only helps jobs under the threshold. |
-| **Hybrid: client + Vercel Workflows + private Blob** | **Go** for the 395-file target, after Blob is provisioned and a real 100–400 file smoke. No Trigger.dev. Workflows ride the existing Vercel project (OIDC). |
-| Ship this PR as production | **No.** Spike: missing Blob, no upload auth, pdf-lib memory still unbounded on huge scans, 395 sortable rows unvirtualized. |
+| Stay **client-only** for 395 Samsung files | **No-go.** The tab will freeze and die. |
+| **Hybrid: client + Vercel Workflows + private Blob** | **Go** for the 395-file *architecture*. Live preview proved 48-file durable merge + download. Remaining risk is large scanned PDFs (pdf-lib memory) and phone upload UX, not “can Workflows merge many files.” |
+| Ship this PR as production | **Not yet.** No upload auth, list not virtualized, no per-file size cap. |
 
 ## Env vars (no Trigger keys)
 
-Set on the Vercel project (Production + Preview + Development):
-
-| Variable | Required for | How |
+| Variable | Required for | Status |
 | --- | --- | --- |
-| `BLOB_READ_WRITE_TOKEN` | Browser uploads (`handleUpload`) | Blob store → project env |
-| `BLOB_STORE_ID` | Server `get`/`put` via OIDC | Connecting the store to the project |
-| `VERCEL_OIDC_TOKEN` | Workflows + Blob on Vercel; local `vercel env pull` | Automatic on deploy; ~12h locally |
+| `BLOB_READ_WRITE_TOKEN` | Browser uploads (`handleUpload`) | Set on Dev / Preview / Production |
+| `BLOB_STORE_ID` | Server `get`/`put` with OIDC | Store `store_hSXUsRUrLNOmzqZt` |
+| `VERCEL_OIDC_TOKEN` | Workflows + Blob on Vercel | Automatic on deploy |
 
-Not used: `TRIGGER_SECRET_KEY` or any Trigger.dev config.
+Not used: `TRIGGER_SECRET_KEY`.
 
-### Dashboard steps (Ship/Brice)
-
-1. Vercel project **pdf-combine** → Storage → Create Database → **Blob** → **Private**.
-2. Connect to this project; include **Development** if you will `vercel env pull`.
-3. `vercel env pull .env.local --yes`
-4. Confirm `.env.local` has `BLOB_READ_WRITE_TOKEN` (and usually `BLOB_STORE_ID`).
-5. Deploy this branch. Workflows need no extra product — `withWorkflow()` + `workflow` package.
-6. Optional: `npx workflow web` while `npm run dev` to inspect runs.
+Local: `vercel env pull .env.local --yes` (include Development on the store connection).
 
 ## How to smoke
 
-### Small client job (no Blob)
+### Small client job
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Add 2–3 PDFs (well under 20 files / 32 MB). Reorder, preview a thumbnail, Combine. DevTools Network should show **no** `/api/blob` or `/api/merge/start`. Progress should tick instead of freezing.
+Open http://localhost:3000. Add 2–3 PDFs. Network should show **no** `/api/blob`. Progress should tick.
 
-### Simulated heavy job (needs Blob)
+### Heavy job on the preview (Blob is live)
 
-1. Provision Blob as above.
-2. Open http://localhost:3000/?spikeHeavy=1
-3. Add **two** tiny PDFs. UI should show the temporary-upload alert and a Heavy badge.
-4. Combine: progress goes upload → queued → merging → download of `combined.pdf`.
-5. Confirm Blob prefix `jobs/{uuid}/` is deleted after download (~15s) or within 1 hour.
-6. Repeat with ~25 files, then a 395-file folder on a phone (Samsung Chrome). The phone should only upload + poll.
+```bash
+SPIKE_BASE_URL="https://<preview>.vercel.app" SPIKE_FILE_COUNT=24 npm run smoke:heavy
+```
 
-If Blob is missing, a 21-file job shows a **destructive alert** and Combine stays disabled — that is the crash-prevention behavior.
+Or in the UI: open `/?spikeHeavy=1`, add two PDFs, Combine. Copy says files upload temporarily then delete.
+
+Phone (Samsung): add many files (or 21+ so the Heavy badge shows), Combine, leave the tab in the foreground while it uploads and polls. The phone should not rasterize every thumbnail.
 
 ## Recommended follow-ups (not this PR)
 
 - Sign job ids so anonymous clients cannot upload into arbitrary prefixes.
 - Virtualize the sortable list at hundreds of rows.
-- Cap per-file and total Blob size; abort uploads with a clear error.
-- If scanned 395-pagers OOM pdf-lib in a step, merge with a streaming tool (qpdf) inside the step, or smaller chunks + smaller intermediates.
+- Cap per-file and total Blob size.
+- If scanned 395-pagers OOM pdf-lib in a step, smaller chunks or a streaming merge tool.
 - Real auth before any public deploy of the upload route.
