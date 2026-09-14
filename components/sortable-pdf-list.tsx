@@ -6,14 +6,13 @@ import {
   MouseSensor,
   TouchSensor,
   closestCenter,
+  pointerWithin,
   useSensor,
   useSensors,
+  type CollisionDetection,
   type DragEndEvent,
 } from "@dnd-kit/core"
-import {
-  restrictToParentElement,
-  restrictToVerticalAxis,
-} from "@dnd-kit/modifiers"
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers"
 import {
   SortableContext,
   arrayMove,
@@ -41,6 +40,11 @@ import { cn } from "@/lib/utils"
 import { formatFileSize, formatPageCount, type PdfItem } from "@/lib/pdf-files"
 
 const DRAG_DISTANCE_PX = 8
+
+const collisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args)
+  return pointerCollisions.length > 0 ? pointerCollisions : closestCenter(args)
+}
 
 function setDocumentDragging(isDragging: boolean): void {
   document.documentElement.classList.toggle("is-dragging", isDragging)
@@ -75,54 +79,59 @@ function SortablePdfItem({
     thumbnail.pageCount != null ? formatPageCount(thumbnail.pageCount) : "PDF"
 
   return (
-    <Attachment
+    <div
       ref={setNodeRef}
-      state={processing ? "processing" : "done"}
-      className={cn("w-full max-w-none", isDragging && "z-10 opacity-50")}
+      role="listitem"
+      className={cn(isDragging && "z-10")}
       style={{
         transform: CSS.Transform.toString(transform),
         transition,
       }}
     >
-      <AttachmentMedia variant="image" className="size-16">
-        <PdfThumbnail thumbnail={thumbnail} />
-      </AttachmentMedia>
-      <AttachmentContent>
-        <AttachmentTitle>{item.file.name}</AttachmentTitle>
-        <AttachmentDescription>
-          {pageLabel} · {formatFileSize(item.file.size)}
-        </AttachmentDescription>
-      </AttachmentContent>
-      <AttachmentTrigger
-        disabled={disabled}
-        aria-label={`Preview ${item.file.name}`}
-        onClick={() => onPreview(item)}
-      />
-      <AttachmentActions>
-        <AttachmentAction
-          {...attributes}
-          {...listeners}
-          type="button"
-          variant="ghost"
-          size="icon-sm"
+      <Attachment
+        state={processing ? "processing" : "done"}
+        className={cn("w-full max-w-none", isDragging && "opacity-50")}
+      >
+        <AttachmentMedia variant="image" className="size-16">
+          <PdfThumbnail thumbnail={thumbnail} />
+        </AttachmentMedia>
+        <AttachmentContent>
+          <AttachmentTitle>{item.file.name}</AttachmentTitle>
+          <AttachmentDescription>
+            {pageLabel} · {formatFileSize(item.file.size)}
+          </AttachmentDescription>
+        </AttachmentContent>
+        <AttachmentTrigger
           disabled={disabled}
-          aria-label={`Drag to reorder ${item.file.name}`}
-          className="touch-none"
-          style={{ touchAction: "none" }}
-        >
-          <HugeiconsIcon icon={DragDropVerticalIcon} strokeWidth={2} />
-        </AttachmentAction>
-        <AttachmentAction
-          type="button"
-          variant="ghost"
-          disabled={disabled}
-          aria-label={`Remove ${item.file.name}`}
-          onClick={() => onRemove(item.id)}
-        >
-          <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
-        </AttachmentAction>
-      </AttachmentActions>
-    </Attachment>
+          aria-label={`Preview ${item.file.name}`}
+          onClick={() => onPreview(item)}
+        />
+        <AttachmentActions>
+          <AttachmentAction
+            {...attributes}
+            {...listeners}
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            disabled={disabled}
+            aria-label={`Drag to reorder ${item.file.name}`}
+            className="touch-none"
+            style={{ touchAction: "none" }}
+          >
+            <HugeiconsIcon icon={DragDropVerticalIcon} strokeWidth={2} />
+          </AttachmentAction>
+          <AttachmentAction
+            type="button"
+            variant="ghost"
+            disabled={disabled}
+            aria-label={`Remove ${item.file.name}`}
+            onClick={() => onRemove(item.id)}
+          >
+            <HugeiconsIcon icon={Cancel01Icon} strokeWidth={2} />
+          </AttachmentAction>
+        </AttachmentActions>
+      </Attachment>
+    </div>
   )
 }
 
@@ -174,8 +183,8 @@ export function SortablePdfList({
 
   return (
     <DndContext
-      collisionDetection={closestCenter}
-      modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+      collisionDetection={collisionDetection}
+      modifiers={[restrictToVerticalAxis]}
       sensors={sensors}
       onDragStart={() => setDocumentDragging(true)}
       onDragCancel={() => setDocumentDragging(false)}
@@ -191,15 +200,14 @@ export function SortablePdfList({
           aria-label="PDF order"
         >
           {items.map((item) => (
-            <div key={item.id} role="listitem">
-              <SortablePdfItem
-                item={item}
-                disabled={disabled}
-                processing={processing}
-                onPreview={onPreview}
-                onRemove={onRemove}
-              />
-            </div>
+            <SortablePdfItem
+              key={item.id}
+              item={item}
+              disabled={disabled}
+              processing={processing}
+              onPreview={onPreview}
+              onRemove={onRemove}
+            />
           ))}
         </div>
       </SortableContext>
