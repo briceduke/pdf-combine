@@ -38,8 +38,8 @@ export function HeavyMergeNotice({
         <AlertTitle>Sign-in is not wired</AlertTitle>
         <AlertDescription>
           Large jobs upload through Vercel Blob and need Better Auth. Set
-          DATABASE_URL, BETTER_AUTH_SECRET, RESEND_API_KEY, and RESEND_FROM_EMAIL
-          — see README.
+          DATABASE_URL (Neon). RESEND_API_KEY and BETTER_AUTH_SECRET are already
+          on Vercel — see README.
         </AlertDescription>
       </Alert>
     )

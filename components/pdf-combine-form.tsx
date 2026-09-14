@@ -132,6 +132,7 @@ export function PdfCombineForm({
   const [mergedBytes, setMergedBytes] = React.useState<Uint8Array | null>(null)
   const searchParams = useSearchParams()
   const forceHeavy = searchParams.has("spikeHeavy")
+  const hasAuthError = searchParams.has("authError")
   const [health, setHealth] = React.useState<MergeHealth>(EMPTY_HEALTH)
   const [heavyJobId, setHeavyJobId] = React.useState<string | null>(null)
   const [heavySession, setHeavySession] = React.useState<HeavyAuthSession>({
@@ -386,6 +387,16 @@ export function PdfCombineForm({
                     }}
                   />
                 </Field>
+              ) : null}
+              {hasAuthError ? (
+                <Alert variant="destructive">
+                  <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} />
+                  <AlertTitle>Sign-in link expired</AlertTitle>
+                  <AlertDescription>
+                    Request a new email link when this job is large enough to
+                    upload. Small on-device merges still do not need an account.
+                  </AlertDescription>
+                </Alert>
               ) : null}
               {isHeavy ? (
                 <HeavyMergeNotice

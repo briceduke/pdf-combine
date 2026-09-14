@@ -46,7 +46,7 @@ cleanup workflow: sleep 1 hour → list+del prefix
 
 Neon: Vercel-managed org listed existing projects (hoverslam, apartments, …) but **create project is blocked** (`organization is managed by Vercel`). Ship/Brice: Vercel Storage → Neon database named `pdf-combine`, then `DATABASE_URL` + `npm run db:migrate`.
 
-Resend: verify `pdf.briceduke.dev` (or the sending domain), set `RESEND_FROM_EMAIL` to an address on that domain (`PDF Combine <auth@pdf.briceduke.dev>`). Not `onboarding@resend.dev` in production.
+Resend: verified domain **onboarding.briceduke.dev**. Default from: `PDF Combine <noreply@onboarding.briceduke.dev>`. `RESEND_API_KEY` and `BETTER_AUTH_SECRET` are on Dev / Preview / Production.
 
 `BETTER_AUTH_URL` on **Production only** (`https://pdf.briceduke.dev`). Preview uses `VERCEL_URL`.
 
@@ -81,15 +81,11 @@ Those runs were **unsigned**. After this change they must 401 without `SPIKE_COO
 
 ## Env (no invented secrets)
 
-See README for the full table. Ship/Brice still needs to set:
+See README for the full table.
 
-- `DATABASE_URL` (Neon pooled)
-- `BETTER_AUTH_SECRET`
-- `BETTER_AUTH_URL` (Production only)
-- `RESEND_API_KEY`
-- `RESEND_FROM_EMAIL` (verified domain)
+**Wired on Vercel (Dev / Preview / Production):** `BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID`, `VERCEL_OIDC_TOKEN`, `RESEND_API_KEY`, `BETTER_AUTH_SECRET`.
 
-Already set: `BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID`, `VERCEL_OIDC_TOKEN`.
+**Still needed:** `DATABASE_URL` (Neon pooled). `BETTER_AUTH_URL` on Production only. From-address defaults in code to `PDF Combine <noreply@onboarding.briceduke.dev>`.
 
 ## How to smoke
 

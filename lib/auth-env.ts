@@ -15,6 +15,10 @@ const LOCAL_ORIGIN = "http://localhost:3000"
 const PRODUCTION_ORIGIN = "https://pdf.briceduke.dev"
 const BUILD_PLACEHOLDER_SECRET = "insecure-build-placeholder-secret-32b"
 
+/** Verified Resend domain `onboarding.briceduke.dev`. Override with RESEND_FROM_EMAIL. */
+export const DEFAULT_MAGIC_LINK_FROM =
+  "PDF Combine <noreply@onboarding.briceduke.dev>"
+
 function readEnv(env: AuthEnv, key: keyof AuthEnv): string | undefined {
   const value = env[key]
   return value && value.length > 0 ? value : undefined
@@ -49,9 +53,7 @@ export function isAuthConfigured(env: AuthEnv = process.env): boolean {
 export function isMagicLinkEmailConfigured(
   env: AuthEnv = process.env
 ): boolean {
-  return Boolean(
-    readEnv(env, "RESEND_API_KEY") && readEnv(env, "RESEND_FROM_EMAIL")
-  )
+  return Boolean(readEnv(env, "RESEND_API_KEY"))
 }
 
 /**
@@ -91,24 +93,15 @@ export function resolveAuthSecret(env: AuthEnv = process.env): string {
 }
 
 /**
- * Resend `from` address. Must match a verified domain in production.
+ * Resend `from` address. Defaults to the verified onboarding.briceduke.dev sender.
  *
  * @param env - Process env, injectable in verify scripts.
- * @returns Address like `PDF Combine <auth@pdf.briceduke.dev>`.
+ * @returns Address like `PDF Combine <noreply@onboarding.briceduke.dev>`.
  */
 export function resolveMagicLinkFromAddress(
   env: AuthEnv = process.env
 ): string {
-  const from = readEnv(env, "RESEND_FROM_EMAIL")
-  if (from) {
-    return from
-  }
-
-  if (env.NODE_ENV === "production") {
-    throw new Error("RESEND_FROM_EMAIL is required in production.")
-  }
-
-  return "PDF Combine <onboarding@resend.dev>"
+  return readEnv(env, "RESEND_FROM_EMAIL") ?? DEFAULT_MAGIC_LINK_FROM
 }
 
 /**

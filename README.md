@@ -47,10 +47,10 @@ No Trigger.dev keys.
 | Variable | Where | Notes |
 | --- | --- | --- |
 | `DATABASE_URL` | Preview + Production (+ Development if you test locally) | Neon **pooled** URL (`-pooler`). Users and sessions. |
-| `BETTER_AUTH_SECRET` | Preview + Production | `openssl rand -base64 32`. Do not reuse across apps. |
+| `BETTER_AUTH_SECRET` | Preview + Production | **Wired** by Ship (`openssl rand -base64 32`). |
 | `BETTER_AUTH_URL` | **Production only** | `https://pdf.briceduke.dev`. Leave unset on Preview so links use `https://$VERCEL_URL`. |
-| `RESEND_API_KEY` | Preview + Production | From [resend.com](https://resend.com) → API Keys. |
-| `RESEND_FROM_EMAIL` | Preview + Production | Must match a **verified Resend domain**. Example: `PDF Combine <auth@pdf.briceduke.dev>`. |
+| `RESEND_API_KEY` | Preview + Production | **Wired** by Ship (key named `pdf-combine`, Sending access). |
+| `RESEND_FROM_EMAIL` | Optional override | Default in code: `PDF Combine <noreply@onboarding.briceduke.dev>` (verified domain **onboarding.briceduke.dev**). |
 
 Optional: `NEXT_PUBLIC_APP_URL` as an alias of the public origin (same Production-only rule as `BETTER_AUTH_URL`).
 
@@ -73,14 +73,13 @@ Schema lives in `db/auth-schema.sql` (Better Auth `user`, `session`, `account`, 
 
 ### Resend domain / from-address
 
-1. Create a Resend account and API key → `RESEND_API_KEY`.
-2. Domains → add `pdf.briceduke.dev` (or the domain you actually send from).
-3. Add the DNS records Resend shows (SPF, DKIM, optionally DMARC).
-4. Wait until the domain is **Verified**.
-5. Set `RESEND_FROM_EMAIL` to an address on that domain, e.g. `PDF Combine <auth@pdf.briceduke.dev>`.
-6. Do **not** use `onboarding@resend.dev` in production (it only delivers to the Resend account owner).
+Verified domain: **onboarding.briceduke.dev**. Magic links send from:
 
-Until Resend is wired, local `next dev` logs the magic-link URL instead of sending mail.
+`PDF Combine <noreply@onboarding.briceduke.dev>`
+
+Override with `RESEND_FROM_EMAIL` if you want a different mailbox on that domain (e.g. `auth@onboarding.briceduke.dev`). Do not use `onboarding@resend.dev`.
+
+`RESEND_API_KEY` is already set on Dev / Preview / Production (key named `pdf-combine`, Sending access). Until the key is present locally, `next dev` logs the magic-link URL instead of sending mail.
 
 ## Heavy merge smoke
 

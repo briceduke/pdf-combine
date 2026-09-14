@@ -29,7 +29,7 @@ function buildMagicLinkHtml(url: string): string {
 export async function sendMagicLinkEmail(input: MagicLinkMail): Promise<void> {
   if (!isMagicLinkEmailConfigured()) {
     if (process.env.NODE_ENV === "production") {
-      throw new Error("RESEND_API_KEY and RESEND_FROM_EMAIL are required.")
+      throw new Error("RESEND_API_KEY is required to send sign-in links.")
     }
 
     console.info(`[auth] Magic link for ${input.email}: ${input.url}`)
@@ -42,6 +42,7 @@ export async function sendMagicLinkEmail(input: MagicLinkMail): Promise<void> {
     to: input.email,
     subject: "Sign in to PDF Combine",
     html: buildMagicLinkHtml(input.url),
+    text: `Sign in to PDF Combine: ${input.url}\nThis link expires in 10 minutes.`,
   })
 
   if (sent.error) {

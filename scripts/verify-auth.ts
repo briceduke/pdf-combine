@@ -2,6 +2,7 @@ import {
   isAuthConfigured,
   isMagicLinkEmailConfigured,
   resolveAuthBaseUrl,
+  resolveMagicLinkFromAddress,
   resolveTrustedOrigins,
 } from "../lib/auth-env.ts"
 import { canStartHeavyCombine } from "../lib/heavy-combine-gate.ts"
@@ -33,12 +34,21 @@ assertEqual(
 )
 assertEqual(isAuthConfigured({}), false, "auth off without secrets")
 assertEqual(
-  isMagicLinkEmailConfigured({
-    RESEND_API_KEY: "re_test",
-    RESEND_FROM_EMAIL: "PDF Combine <auth@pdf.briceduke.dev>",
-  }),
+  isMagicLinkEmailConfigured({ RESEND_API_KEY: "re_test" }),
   true,
-  "email configured when Resend key + from exist"
+  "email configured when Resend key exists (verified from is default)"
+)
+assertEqual(
+  resolveMagicLinkFromAddress({}),
+  "PDF Combine <noreply@onboarding.briceduke.dev>",
+  "default from is the verified onboarding domain"
+)
+assertEqual(
+  resolveMagicLinkFromAddress({
+    RESEND_FROM_EMAIL: "PDF Combine <hello@onboarding.briceduke.dev>",
+  }),
+  "PDF Combine <hello@onboarding.briceduke.dev>",
+  "RESEND_FROM_EMAIL overrides the default sender"
 )
 
 assertEqual(
