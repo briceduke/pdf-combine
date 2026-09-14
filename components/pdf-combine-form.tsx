@@ -5,10 +5,12 @@ import {
   Alert02Icon,
   CloudUploadIcon,
   Download01Icon,
+  ViewIcon,
 } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 import { toast } from "sonner"
 
+import { PdfPreviewDialog } from "@/components/pdf-preview-dialog"
 import { SortablePdfList } from "@/components/sortable-pdf-list"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -38,24 +40,22 @@ import {
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
+import { downloadPdfBytes } from "@/lib/download-pdf"
 import { mergePdfFiles } from "@/lib/merge-pdfs"
 import { createPdfItems, splitPdfFiles, type PdfItem } from "@/lib/pdf-files"
 import { cn } from "@/lib/utils"
 
-function downloadPdf(bytes: Uint8Array, filename: string) {
-  const buffer = bytes.buffer.slice(
-    bytes.byteOffset,
-    bytes.byteOffset + bytes.byteLength
-  ) as ArrayBuffer
-  const blob = new Blob([buffer], { type: "application/pdf" })
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement("a")
-
-  link.href = url
-  link.download = filename
-  link.click()
-  URL.revokeObjectURL(url)
+interface FilePreview {
+  readonly kind: "file"
+  readonly item: PdfItem
 }
+
+interface MergedPreview {
+  readonly kind: "merged"
+  readonly bytes: Uint8Array
+}
+
+type ActivePreview = FilePreview | MergedPreview | null
 
 export function PdfCombineForm({
   className,
@@ -67,12 +67,21 @@ export function PdfCombineForm({
   const [isCombining, setIsCombining] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
   const [error, setError] = React.useState<string | null>(null)
+  const [preview, setPreview] = React.useState<ActivePreview>(null)
+  const [mergedBytes, setMergedBytes] = React.useState<Uint8Array | null>(null)
 
-  function addFiles(fileList: FileList | File[]) {
+  function updateItems(
+    updater: PdfItem[] | ((current: PdfItem[]) => PdfItem[])
+  ): void {
+    setItems(updater)
+    setMergedBytes(null)
+  }
+
+  function addFiles(fileList: FileList | File[]): void {
     const { accepted, rejected } = splitPdfFiles(Array.from(fileList))
 
     if (accepted.length > 0) {
-      setItems((current) => [...current, ...createPdfItems(accepted)])
+      updateItems((current) => [...current, ...createPdfItems(accepted)])
       setError(null)
     }
 
@@ -84,12 +93,12 @@ export function PdfCombineForm({
     }
   }
 
-  function handleDragOver(event: React.DragEvent<HTMLDivElement>) {
+  function handleDragOver(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault()
     setIsDragging(true)
   }
 
-  function handleDragLeave(event: React.DragEvent<HTMLDivElement>) {
+  function handleDragLeave(event: React.DragEvent<HTMLDivElement>): void {
     if (event.currentTarget.contains(event.relatedTarget as Node)) {
       return
     }
@@ -97,33 +106,41 @@ export function PdfCombineForm({
     setIsDragging(false)
   }
 
-  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
+  function handleDrop(event: React.DragEvent<HTMLDivElement>): void {
     event.preventDefault()
     setIsDragging(false)
     addFiles(event.dataTransfer.files)
   }
 
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function combineItems(): Promise<Uint8Array> {
+    if (mergedBytes) {
+      return mergedBytes
+    }
 
+    const bytes = await mergePdfFiles(
+      items.map((item) => item.file),
+      (done, total) => {
+        setProgress(Math.round((done / total) * 100))
+      }
+    )
+
+    setMergedBytes(bytes)
+    return bytes
+  }
+
+  async function runCombine(
+    onSuccess: (bytes: Uint8Array) => void
+  ): Promise<void> {
     if (items.length < 2 || isCombining) {
       return
     }
 
     setIsCombining(true)
-    setProgress(0)
+    setProgress(mergedBytes ? 100 : 0)
     setError(null)
 
     try {
-      const bytes = await mergePdfFiles(
-        items.map((item) => item.file),
-        (done, total) => {
-          setProgress(Math.round((done / total) * 100))
-        }
-      )
-
-      downloadPdf(bytes, "combined.pdf")
-      toast.success(`Combined ${items.length} PDFs.`)
+      onSuccess(await combineItems())
     } catch (caught) {
       const message =
         caught instanceof Error
@@ -136,14 +153,37 @@ export function PdfCombineForm({
     }
   }
 
+  async function handleSubmit(
+    event: React.FormEvent<HTMLFormElement>
+  ): Promise<void> {
+    event.preventDefault()
+    await runCombine((bytes) => {
+      downloadPdfBytes(bytes, "combined.pdf")
+      toast.success(`Combined ${items.length} PDFs.`)
+    })
+  }
+
+  async function handlePreviewCombined(): Promise<void> {
+    await runCombine((bytes) => {
+      setPreview({ kind: "merged", bytes })
+    })
+  }
+
+  const previewSource =
+    preview?.kind === "file"
+      ? preview.item.file
+      : preview?.kind === "merged"
+        ? preview.bytes
+        : null
+
   return (
     <div className={cn("flex flex-col gap-6", className)} {...props}>
       <Card>
         <CardHeader className="text-center">
           <CardTitle className="text-xl">Combine PDFs</CardTitle>
           <CardDescription>
-            Drop files, reorder them, then download one PDF. Nothing is
-            uploaded.
+            Drop files, preview pages, reorder them, then download one PDF.
+            Nothing is uploaded.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -204,16 +244,19 @@ export function PdfCombineForm({
                     <Badge variant="secondary">{items.length}</Badge>
                   </FieldLabel>
                   <FieldDescription>
-                    Drag the handle to reorder. The top file is first in the
-                    combined PDF.
+                    Tap a thumbnail to preview pages. Drag the handle to reorder
+                    — the top file is first in the combined PDF.
                   </FieldDescription>
                   <SortablePdfList
                     items={items}
                     disabled={isCombining}
                     processing={isCombining}
-                    onReorder={setItems}
+                    onPreview={(item) => {
+                      setPreview({ kind: "file", item })
+                    }}
+                    onReorder={updateItems}
                     onRemove={(id) => {
-                      setItems((current) =>
+                      updateItems((current) =>
                         current.filter((item) => item.id !== id)
                       )
                     }}
@@ -236,24 +279,38 @@ export function PdfCombineForm({
                 </Field>
               ) : null}
               <Field>
+                <Button
+                  type="submit"
+                  className="w-full"
+                  disabled={items.length < 2 || isCombining}
+                >
+                  {isCombining ? (
+                    <Spinner />
+                  ) : (
+                    <HugeiconsIcon icon={Download01Icon} strokeWidth={2} />
+                  )}
+                  Combine
+                </Button>
                 <ButtonGroup className="w-full *:flex-1">
                   <Button
-                    type="submit"
+                    type="button"
+                    variant="outline"
                     disabled={items.length < 2 || isCombining}
+                    onClick={() => {
+                      void handlePreviewCombined()
+                    }}
                   >
-                    {isCombining ? (
-                      <Spinner />
-                    ) : (
-                      <HugeiconsIcon icon={Download01Icon} strokeWidth={2} />
-                    )}
-                    Combine
+                    <HugeiconsIcon icon={ViewIcon} strokeWidth={2} />
+                    Preview
                   </Button>
                   <Button
                     type="button"
                     variant="outline"
                     disabled={items.length === 0 || isCombining}
                     onClick={() => {
-                      setItems([])
+                      updateItems([])
+                      setPreview(null)
+                      setMergedBytes(null)
                       setError(null)
                       setProgress(0)
                     }}
@@ -274,6 +331,28 @@ export function PdfCombineForm({
       <FieldDescription className="px-6 text-center">
         Private by design — merging runs on your device with pdf-lib.
       </FieldDescription>
+      <PdfPreviewDialog
+        open={preview !== null}
+        title={
+          preview?.kind === "file" ? preview.item.file.name : "combined.pdf"
+        }
+        source={previewSource}
+        downloadLabel="Download combined.pdf"
+        onOpenChange={(open) => {
+          if (!open) {
+            setPreview(null)
+          }
+        }}
+        onDownload={
+          preview?.kind === "merged"
+            ? () => {
+                downloadPdfBytes(preview.bytes, "combined.pdf")
+                toast.success(`Combined ${items.length} PDFs.`)
+                setPreview(null)
+              }
+            : undefined
+        }
+      />
     </div>
   )
 }

@@ -22,13 +22,10 @@ import {
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable"
 import { CSS } from "@dnd-kit/utilities"
-import {
-  Cancel01Icon,
-  DragDropVerticalIcon,
-  Pdf01Icon,
-} from "@hugeicons/core-free-icons"
+import { Cancel01Icon, DragDropVerticalIcon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
 
+import { PdfThumbnail } from "@/components/pdf-thumbnail"
 import {
   Attachment,
   AttachmentAction,
@@ -37,21 +34,32 @@ import {
   AttachmentDescription,
   AttachmentMedia,
   AttachmentTitle,
+  AttachmentTrigger,
 } from "@/components/ui/attachment"
+import { usePdfThumbnail } from "@/hooks/use-pdf-thumbnail"
 import { cn } from "@/lib/utils"
-import { formatFileSize, type PdfItem } from "@/lib/pdf-files"
+import { formatFileSize, formatPageCount, type PdfItem } from "@/lib/pdf-files"
+
+const DRAG_DISTANCE_PX = 8
+
+function setDocumentDragging(isDragging: boolean): void {
+  document.documentElement.classList.toggle("is-dragging", isDragging)
+}
 
 function SortablePdfItem({
   item,
   disabled,
   processing,
+  onPreview,
   onRemove,
 }: {
-  item: PdfItem
-  disabled?: boolean
-  processing?: boolean
-  onRemove: (id: string) => void
+  readonly item: PdfItem
+  readonly disabled?: boolean
+  readonly processing?: boolean
+  readonly onPreview: (item: PdfItem) => void
+  readonly onRemove: (id: string) => void
 }) {
+  const thumbnail = usePdfThumbnail(item.file)
   const {
     attributes,
     listeners,
@@ -63,6 +71,8 @@ function SortablePdfItem({
     id: item.id,
     disabled,
   })
+  const pageLabel =
+    thumbnail.pageCount != null ? formatPageCount(thumbnail.pageCount) : "PDF"
 
   return (
     <Attachment
@@ -74,26 +84,36 @@ function SortablePdfItem({
         transition,
       }}
     >
-      <AttachmentMedia>
-        <HugeiconsIcon icon={Pdf01Icon} strokeWidth={2} />
+      <AttachmentMedia variant="image" className="size-16">
+        <PdfThumbnail thumbnail={thumbnail} />
       </AttachmentMedia>
       <AttachmentContent>
         <AttachmentTitle>{item.file.name}</AttachmentTitle>
         <AttachmentDescription>
-          PDF · {formatFileSize(item.file.size)}
+          {pageLabel} · {formatFileSize(item.file.size)}
         </AttachmentDescription>
       </AttachmentContent>
+      <AttachmentTrigger
+        disabled={disabled}
+        aria-label={`Preview ${item.file.name}`}
+        onClick={() => onPreview(item)}
+      />
       <AttachmentActions>
         <AttachmentAction
-          variant="ghost"
-          disabled={disabled}
-          aria-label={`Drag to reorder ${item.file.name}`}
           {...attributes}
           {...listeners}
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          disabled={disabled}
+          aria-label={`Drag to reorder ${item.file.name}`}
+          className="touch-none"
+          style={{ touchAction: "none" }}
         >
           <HugeiconsIcon icon={DragDropVerticalIcon} strokeWidth={2} />
         </AttachmentAction>
         <AttachmentAction
+          type="button"
           variant="ghost"
           disabled={disabled}
           aria-label={`Remove ${item.file.name}`}
@@ -110,26 +130,32 @@ export function SortablePdfList({
   items,
   disabled,
   processing,
+  onPreview,
   onReorder,
   onRemove,
 }: {
-  items: PdfItem[]
-  disabled?: boolean
-  processing?: boolean
-  onReorder: (items: PdfItem[]) => void
-  onRemove: (id: string) => void
+  readonly items: PdfItem[]
+  readonly disabled?: boolean
+  readonly processing?: boolean
+  readonly onPreview: (item: PdfItem) => void
+  readonly onReorder: (items: PdfItem[]) => void
+  readonly onRemove: (id: string) => void
 }) {
   const sensors = useSensors(
-    useSensor(MouseSensor, {}),
+    useSensor(MouseSensor, {
+      activationConstraint: { distance: DRAG_DISTANCE_PX },
+    }),
     useSensor(TouchSensor, {
-      activationConstraint: { delay: 200, tolerance: 5 },
+      activationConstraint: { distance: DRAG_DISTANCE_PX },
     }),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   )
 
-  function handleDragEnd(event: DragEndEvent) {
+  function handleDragEnd(event: DragEndEvent): void {
+    setDocumentDragging(false)
+
     const { active, over } = event
 
     if (!over || active.id === over.id) {
@@ -151,19 +177,26 @@ export function SortablePdfList({
       collisionDetection={closestCenter}
       modifiers={[restrictToVerticalAxis, restrictToParentElement]}
       sensors={sensors}
+      onDragStart={() => setDocumentDragging(true)}
+      onDragCancel={() => setDocumentDragging(false)}
       onDragEnd={handleDragEnd}
     >
       <SortableContext
         items={items.map((item) => item.id)}
         strategy={verticalListSortingStrategy}
       >
-        <div className="flex flex-col gap-2" role="list" aria-label="PDF order">
+        <div
+          className="flex touch-pan-y flex-col gap-2"
+          role="list"
+          aria-label="PDF order"
+        >
           {items.map((item) => (
             <div key={item.id} role="listitem">
               <SortablePdfItem
                 item={item}
                 disabled={disabled}
                 processing={processing}
+                onPreview={onPreview}
                 onRemove={onRemove}
               />
             </div>

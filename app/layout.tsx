@@ -29,12 +29,12 @@ export default function RootLayout({
       lang="en"
       suppressHydrationWarning
       className={cn(
-        "font-sans antialiased",
+        "h-full overflow-hidden overscroll-none font-sans antialiased",
         fontMono.variable,
         figtree.variable
       )}
     >
-      <body>
+      <body className="h-full overflow-hidden overscroll-none">
         <ThemeProvider>
           {children}
           <Toaster />

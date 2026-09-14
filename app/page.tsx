@@ -8,8 +8,8 @@ import { PdfCombineForm } from "@/components/pdf-combine-form"
 
 export default function Page() {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-muted p-6 md:p-10">
-      <div className="flex w-full max-w-lg flex-col gap-6">
+    <div className="flex h-dvh flex-col overflow-y-auto overscroll-none bg-muted">
+      <div className="mx-auto flex w-full max-w-lg flex-col gap-6 px-6 py-6 md:min-h-full md:justify-center md:py-10">
         <Link
           href="/"
           className="flex items-center gap-2 self-center font-medium"

@@ -120,10 +120,14 @@
   * {
     @apply border-border outline-ring/50;
     }
-  body {
-    @apply bg-background text-foreground;
-    }
   html {
-    @apply font-sans;
+    @apply h-full overflow-hidden overscroll-none font-sans;
+    }
+  body {
+    @apply h-full overflow-hidden overscroll-none bg-background text-foreground;
+    }
+  html.is-dragging,
+  html.is-dragging body {
+    @apply overflow-hidden overscroll-none;
     }
 }
