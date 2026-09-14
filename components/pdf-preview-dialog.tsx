@@ -120,7 +120,8 @@ function PdfPreviewBody({
           ) : null}
           {hasError ? (
             <p className="text-sm text-destructive">
-              Could not render a preview of this PDF.
+              Could not render a preview of this PDF. The file may be too large
+              for this device — download it instead of previewing every page.
             </p>
           ) : null}
           {images.map((image) => (

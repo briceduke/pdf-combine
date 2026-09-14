@@ -3,6 +3,7 @@
 import * as React from "react"
 
 import { renderPdfThumbnail } from "@/lib/pdf-preview"
+import { runThumbnailJob } from "@/lib/thumbnail-queue"
 
 export interface PdfThumbnailState {
   readonly imageUrl: string | null
@@ -11,29 +12,53 @@ export interface PdfThumbnailState {
   readonly hasError: boolean
 }
 
-const INITIAL_STATE: PdfThumbnailState = {
+export interface UsePdfThumbnailOptions {
+  readonly enabled: boolean
+}
+
+const IDLE_STATE: PdfThumbnailState = {
   imageUrl: null,
   pageCount: null,
-  isLoading: true,
+  isLoading: false,
   hasError: false,
 }
 
 /**
- * Rasterize the first page of a PDF for the queue thumbnail.
+ * Rasterize the first page of a PDF when the row is on screen.
  *
  * @param file - Source PDF.
+ * @param options - Skip work when the row is offscreen or thumbs are disabled.
  * @returns Thumbnail object URL, page count, and loading flags.
  */
-export function usePdfThumbnail(file: File): PdfThumbnailState {
-  const [state, setState] = React.useState<PdfThumbnailState>(INITIAL_STATE)
+export function usePdfThumbnail(
+  file: File,
+  options: UsePdfThumbnailOptions
+): PdfThumbnailState {
+  const [state, setState] = React.useState<PdfThumbnailState>(
+    options.enabled ? { ...IDLE_STATE, isLoading: true } : IDLE_STATE
+  )
 
   React.useEffect(() => {
+    if (!options.enabled) {
+      setState(IDLE_STATE)
+      return
+    }
+
     let isCancelled = false
     let objectUrl: string | null = null
 
+    setState({
+      imageUrl: null,
+      pageCount: null,
+      isLoading: true,
+      hasError: false,
+    })
+
     async function loadThumbnail(): Promise<void> {
       try {
-        const { blob, pageCount } = await renderPdfThumbnail(file)
+        const { blob, pageCount } = await runThumbnailJob(() =>
+          renderPdfThumbnail(file)
+        )
 
         if (isCancelled) {
           return
@@ -66,7 +91,7 @@ export function usePdfThumbnail(file: File): PdfThumbnailState {
         URL.revokeObjectURL(objectUrl)
       }
     }
-  }, [file])
+  }, [file, options.enabled])
 
   return state
 }

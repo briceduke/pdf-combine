@@ -1,5 +1,6 @@
 "use client"
 
+import * as React from "react"
 import {
   DndContext,
   KeyboardSensor,
@@ -35,6 +36,7 @@ import {
   AttachmentTitle,
   AttachmentTrigger,
 } from "@/components/ui/attachment"
+import { useInViewport } from "@/hooks/use-in-viewport"
 import { usePdfThumbnail } from "@/hooks/use-pdf-thumbnail"
 import { cn } from "@/lib/utils"
 import { formatFileSize, formatPageCount, type PdfItem } from "@/lib/pdf-files"
@@ -54,16 +56,28 @@ function SortablePdfItem({
   item,
   disabled,
   processing,
+  skipThumbs,
   onPreview,
   onRemove,
 }: {
   readonly item: PdfItem
   readonly disabled?: boolean
   readonly processing?: boolean
+  readonly skipThumbs: boolean
   readonly onPreview: (item: PdfItem) => void
   readonly onRemove: (id: string) => void
 }) {
-  const thumbnail = usePdfThumbnail(item.file)
+  const itemRef = React.useRef<HTMLDivElement>(null)
+  const isVisible = useInViewport(itemRef)
+  const [hasBeenVisible, setHasBeenVisible] = React.useState(false)
+
+  if (isVisible && !hasBeenVisible) {
+    setHasBeenVisible(true)
+  }
+
+  const thumbnail = usePdfThumbnail(item.file, {
+    enabled: !skipThumbs && hasBeenVisible,
+  })
   const {
     attributes,
     listeners,
@@ -80,7 +94,10 @@ function SortablePdfItem({
 
   return (
     <div
-      ref={setNodeRef}
+      ref={(node) => {
+        setNodeRef(node)
+        itemRef.current = node
+      }}
       role="listitem"
       className={cn(isDragging && "z-10")}
       style={{
@@ -139,6 +156,7 @@ export function SortablePdfList({
   items,
   disabled,
   processing,
+  skipThumbs = false,
   onPreview,
   onReorder,
   onRemove,
@@ -146,6 +164,7 @@ export function SortablePdfList({
   readonly items: PdfItem[]
   readonly disabled?: boolean
   readonly processing?: boolean
+  readonly skipThumbs?: boolean
   readonly onPreview: (item: PdfItem) => void
   readonly onReorder: (items: PdfItem[]) => void
   readonly onRemove: (id: string) => void
@@ -205,6 +224,7 @@ export function SortablePdfList({
               item={item}
               disabled={disabled}
               processing={processing}
+              skipThumbs={skipThumbs}
               onPreview={onPreview}
               onRemove={onRemove}
             />

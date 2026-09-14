@@ -1,9 +1,10 @@
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/types/src/pdf"
 
 export const PDF_WORKER_SRC = "/pdf.worker.min.mjs"
-export const THUMBNAIL_WIDTH_PX = 128
+export const THUMBNAIL_WIDTH_PX = 96
 export const PREVIEW_WIDTH_PX = 480
 export const MAX_PREVIEW_PAGES = 8
+export const MAX_CANVAS_EDGE_PX = 2048
 
 export interface PdfPageImage {
   readonly pageNumber: number
@@ -70,6 +71,8 @@ export async function loadPdfDocument(
   return pdfjs.getDocument({
     data,
     useSystemFonts: true,
+    disableAutoFetch: true,
+    disableFontFace: true,
   }).promise
 }
 
@@ -80,7 +83,9 @@ async function closePdfDocument(pdf: PDFDocumentProxy): Promise<void> {
 
 function scaleForWidth(page: PDFPageProxy, targetWidth: number): number {
   const baseViewport = page.getViewport({ scale: 1 })
-  return targetWidth / baseViewport.width
+  const widthScale = targetWidth / baseViewport.width
+  const maxScale = MAX_CANVAS_EDGE_PX / Math.max(baseViewport.width, baseViewport.height)
+  return Math.min(widthScale, maxScale)
 }
 
 async function renderPageToBlob(
@@ -95,8 +100,8 @@ async function renderPageToBlob(
     throw new Error("Could not create a canvas to preview this PDF.")
   }
 
-  canvas.width = Math.ceil(viewport.width)
-  canvas.height = Math.ceil(viewport.height)
+  canvas.width = Math.min(MAX_CANVAS_EDGE_PX, Math.ceil(viewport.width))
+  canvas.height = Math.min(MAX_CANVAS_EDGE_PX, Math.ceil(viewport.height))
 
   await page.render({
     canvas,
@@ -140,6 +145,7 @@ export async function renderPdfThumbnail(
   const page = await pdf.getPage(1)
   const blob = await renderPageToBlob(page, THUMBNAIL_WIDTH_PX)
   const pageCount = pdf.numPages
+  page.cleanup()
 
   await closePdfDocument(pdf)
 
@@ -170,6 +176,7 @@ export async function renderPdfPreviewPages(
       pageNumber,
       blob: await renderPageToBlob(page, PREVIEW_WIDTH_PX),
     })
+    page.cleanup()
   }
 
   await closePdfDocument(pdf)

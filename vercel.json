@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "app/.well-known/workflow/**/*": {
+      "maxDuration": 300
+    },
+    "app/api/merge/**/*.ts": {
+      "maxDuration": 60
+    }
+  }
+}
