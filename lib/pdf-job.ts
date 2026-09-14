@@ -115,6 +115,16 @@ export function progressPathname(jobId: string): string {
 }
 
 /**
+ * Blob pathname for the signed-in owner of a heavy-merge job.
+ *
+ * @param jobId - UUID for this combine run.
+ * @returns Owner JSON pathname.
+ */
+export function ownerPathname(jobId: string): string {
+  return `${jobPrefix(jobId)}owner.json`
+}
+
+/**
  * Keep blob path names ASCII and short.
  *
  * @param fileName - Original file name from the device.

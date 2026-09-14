@@ -1,7 +1,17 @@
 import { NextResponse } from "next/server"
 import { start } from "workflow/api"
 
-import { isHeavyMergeConfigured, writeMergeProgress } from "@/lib/blob-store"
+import {
+  authNotConfiguredResponse,
+  getSessionUser,
+  unauthorizedResponse,
+} from "@/lib/auth-session"
+import { isAuthConfigured } from "@/lib/auth-env"
+import {
+  assertMergeJobOwner,
+  isHeavyMergeConfigured,
+  writeMergeProgress,
+} from "@/lib/blob-store"
 import {
   assertJobSources,
   heavyMergeStartSchema,
@@ -13,6 +23,7 @@ export const maxDuration = 60
 
 /**
  * Start a durable Workflow merge after client uploads finish.
+ * Requires a Better Auth session that owns the job prefix.
  *
  * @param request - JSON `{ jobId, sources }`.
  * @returns `{ runId, jobId }` for polling.
@@ -23,6 +34,15 @@ export async function POST(request: Request): Promise<NextResponse> {
       { error: "Heavy merge is not configured. Add BLOB_READ_WRITE_TOKEN." },
       { status: 503 }
     )
+  }
+
+  if (!isAuthConfigured()) {
+    return authNotConfiguredResponse()
+  }
+
+  const user = await getSessionUser()
+  if (!user) {
+    return unauthorizedResponse()
   }
 
   const parsed = heavyMergeStartSchema.safeParse(await request.json())
@@ -36,6 +56,7 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   try {
     assertJobSources(parsed.data.jobId, parsed.data.sources)
+    await assertMergeJobOwner(parsed.data.jobId, user.id)
   } catch (caught) {
     const message =
       caught instanceof Error ? caught.message : "Invalid merge request."

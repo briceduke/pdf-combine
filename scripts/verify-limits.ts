@@ -3,6 +3,8 @@ import {
   CLIENT_MAX_TOTAL_BYTES,
   decideMergePath,
   describeMergeError,
+  isApproachingHeavyLimit,
+  shouldPromptMagicLink,
 } from "../lib/merge-limits.ts"
 
 function assertEqual<T>(actual: T, expected: T, label: string): void {
@@ -41,5 +43,16 @@ const oom = describeMergeError(new RangeError("Array buffer allocation failed"))
 if (!oom.includes("memory")) {
   throw new Error(`Expected memory copy, got: ${oom}`)
 }
+
+assertEqual(
+  shouldPromptMagicLink(false, false),
+  false,
+  "light jobs never show magic link"
+)
+assertEqual(
+  isApproachingHeavyLimit({ fileCount: 16, totalBytes: 1024 }),
+  true,
+  "16 files is approaching"
+)
 
 console.log("Merge path limits: client < 20 files / 32 MB; 395 files → heavy.")

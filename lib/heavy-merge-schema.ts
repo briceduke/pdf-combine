@@ -1,5 +1,6 @@
 import { z } from "zod"
 
+import { HEAVY_MAX_FILE_COUNT } from "@/lib/merge-limits"
 import { JOB_ID_PATTERN, type UploadedPdfSource } from "@/lib/pdf-job"
 
 export const uploadedPdfSourceSchema = z.object({
@@ -9,7 +10,7 @@ export const uploadedPdfSourceSchema = z.object({
 
 export const heavyMergeStartSchema = z.object({
   jobId: z.string().regex(JOB_ID_PATTERN),
-  sources: z.array(uploadedPdfSourceSchema).min(2).max(500),
+  sources: z.array(uploadedPdfSourceSchema).min(2).max(HEAVY_MAX_FILE_COUNT),
 })
 
 export type HeavyMergeStartBody = z.infer<typeof heavyMergeStartSchema>

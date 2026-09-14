@@ -1,9 +1,17 @@
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client"
 import { NextResponse } from "next/server"
 
-import { isHeavyMergeConfigured } from "@/lib/blob-store"
+import {
+  authNotConfiguredResponse,
+  getSessionUser,
+  unauthorizedResponse,
+} from "@/lib/auth-session"
+import { isAuthConfigured } from "@/lib/auth-env"
+import { claimMergeJobOwner, isHeavyMergeConfigured } from "@/lib/blob-store"
+import { HEAVY_MAX_FILE_BYTES } from "@/lib/merge-limits"
 import { isJobId } from "@/lib/pdf-job"
 import { tryCatch } from "@/lib/try-catch"
+import { parseUploadClientPayload } from "@/lib/upload-client-payload"
 
 export const maxDuration = 60
 
@@ -17,6 +25,7 @@ function assertUploadPath(pathname: string, jobId: string): void {
 
 /**
  * Issue short-lived Blob client tokens for batched PDF uploads.
+ * Requires a Better Auth session. Client-only small merges never hit this.
  *
  * @param request - Blob SDK handshake body.
  * @returns Token JSON for `@vercel/blob/client`.
@@ -29,20 +38,34 @@ export async function POST(request: Request): Promise<NextResponse> {
     )
   }
 
+  if (!isAuthConfigured()) {
+    return authNotConfiguredResponse()
+  }
+
+  const user = await getSessionUser()
+  if (!user) {
+    return unauthorizedResponse()
+  }
+
   const body = (await request.json()) as HandleUploadBody
   const result = await tryCatch(() =>
     handleUpload({
       body,
       request,
       onBeforeGenerateToken: async (pathname, clientPayload) => {
-        const jobId = clientPayload ?? ""
-        assertUploadPath(pathname, jobId)
+        const payload = parseUploadClientPayload(clientPayload ?? "")
+        assertUploadPath(pathname, payload.jobId)
+        await claimMergeJobOwner(payload.jobId, user.id)
 
         return {
           allowedContentTypes: ["application/pdf", "application/octet-stream"],
           addRandomSuffix: true,
+          maximumSizeInBytes: HEAVY_MAX_FILE_BYTES,
           validUntil: Date.now() + 60 * 60 * 1000,
-          tokenPayload: JSON.stringify({ jobId }),
+          tokenPayload: JSON.stringify({
+            jobId: payload.jobId,
+            userId: user.id,
+          }),
         }
       },
       onUploadCompleted: async () => {

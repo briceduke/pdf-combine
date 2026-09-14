@@ -10,8 +10,10 @@ import {
 } from "@/lib/pdf-job"
 import { tryCatch } from "@/lib/try-catch"
 
-interface MergeHealth {
+export interface MergeHealth {
   readonly enabled: boolean
+  readonly authConfigured: boolean
+  readonly emailConfigured: boolean
 }
 
 interface StartMergeResponse {
@@ -60,7 +62,7 @@ async function parseJson<T>(response: Response): Promise<T> {
 export async function fetchMergeHealth(): Promise<MergeHealth> {
   const response = await fetch("/api/merge/health")
   if (!response.ok) {
-    return { enabled: false }
+    return { enabled: false, authConfigured: false, emailConfigured: false }
   }
 
   return parseJson<MergeHealth>(response)
@@ -75,7 +77,7 @@ async function uploadOnePdf(
   const blob = await upload(pathname, file, {
     access: "private",
     handleUploadUrl: "/api/blob/upload",
-    clientPayload: jobId,
+    clientPayload: JSON.stringify({ jobId, byteSize: file.size }),
     multipart: file.size > 4 * 1024 * 1024,
     contentType: "application/pdf",
   })
@@ -172,6 +174,12 @@ export async function runHeavyMerge(
     const body = await parseJson<StartMergeResponse & { error?: string }>(
       response
     )
+
+    if (response.status === 401) {
+      throw new Error(
+        "Sign in with the email link to upload this job. Small jobs on this device do not need an account."
+      )
+    }
 
     if (!response.ok || !body.runId) {
       throw new Error(body.error ?? "Could not start server merge.")

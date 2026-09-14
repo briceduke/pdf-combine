@@ -16,6 +16,12 @@ export interface UsePdfThumbnailOptions {
   readonly enabled: boolean
 }
 
+interface ThumbnailResult {
+  readonly imageUrl: string | null
+  readonly pageCount: number | null
+  readonly hasError: boolean
+}
+
 const IDLE_STATE: PdfThumbnailState = {
   imageUrl: null,
   pageCount: null,
@@ -34,56 +40,39 @@ export function usePdfThumbnail(
   file: File,
   options: UsePdfThumbnailOptions
 ): PdfThumbnailState {
-  const [state, setState] = React.useState<PdfThumbnailState>(
-    options.enabled ? { ...IDLE_STATE, isLoading: true } : IDLE_STATE
-  )
+  const [result, setResult] = React.useState<ThumbnailResult | null>(null)
 
   React.useEffect(() => {
     if (!options.enabled) {
-      setState(IDLE_STATE)
       return
     }
 
     let isCancelled = false
     let objectUrl: string | null = null
 
-    setState({
-      imageUrl: null,
-      pageCount: null,
-      isLoading: true,
-      hasError: false,
-    })
-
-    async function loadThumbnail(): Promise<void> {
-      try {
-        const { blob, pageCount } = await runThumbnailJob(() =>
-          renderPdfThumbnail(file)
-        )
-
+    void runThumbnailJob(() => renderPdfThumbnail(file)).then(
+      ({ blob, pageCount }) => {
         if (isCancelled) {
           return
         }
 
         objectUrl = URL.createObjectURL(blob)
-        setState({
+        setResult({
           imageUrl: objectUrl,
           pageCount,
-          isLoading: false,
           hasError: false,
         })
-      } catch {
+      },
+      () => {
         if (!isCancelled) {
-          setState({
+          setResult({
             imageUrl: null,
             pageCount: null,
-            isLoading: false,
             hasError: true,
           })
         }
       }
-    }
-
-    void loadThumbnail()
+    )
 
     return () => {
       isCancelled = true
@@ -93,5 +82,23 @@ export function usePdfThumbnail(
     }
   }, [file, options.enabled])
 
-  return state
+  if (!options.enabled) {
+    return IDLE_STATE
+  }
+
+  if (!result) {
+    return {
+      imageUrl: null,
+      pageCount: null,
+      isLoading: true,
+      hasError: false,
+    }
+  }
+
+  return {
+    imageUrl: result.imageUrl,
+    pageCount: result.pageCount,
+    isLoading: false,
+    hasError: result.hasError,
+  }
 }

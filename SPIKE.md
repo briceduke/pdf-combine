@@ -1,55 +1,58 @@
-# SPIKE — Vercel Workflows heavy merge
+# Hybrid merge — Vercel Workflows + Better Auth
 
-Research + prototype, not a production hybrid ship. Do not merge until a phone-class 395-file job is smoked.
+Productize of the 395-file Samsung path. Draft PR — do not merge until a phone-class job is smoked **and** Resend/Neon env is wired.
 
 ## What broke at ~395 files (Samsung / mobile Chrome)
 
 The original report was “~350 pages.” The confirmed repro is **395 files**. After Combine the tab **freezes, then Chrome kills it**.
 
-Client merge did all of this on the main thread:
-
-1. `Promise.all(files.map((file) => file.arrayBuffer()))` — every PDF decoded into memory at once.
-2. pdf-lib `load` + `copyPages` for each file without yielding, so the progress bar never painted.
-3. `merged.save()` allocated a second full copy.
-4. Every list row immediately rasterized a pdfjs thumbnail (canvas + worker), which is catastrophic at hundreds of files even before Combine.
-
 A phone-class Chrome tab cannot hold hundreds of decoded PDFs. **Client-only merge for 395 files is a no-go.** Yielding and lazy thumbs fix small jobs; they cannot make 395-file merge safe on Samsung.
 
 ## Threshold (chosen)
 
-| Path | When |
-| --- | --- |
-| **Client** (no upload) | `< 20` files **and** `< 32 MB` total |
-| **Heavy** (Blob + Workflow) | `≥ 20` files **or** `≥ 32 MB`, or `?spikeHeavy=1` |
+| Path | When | Auth |
+| --- | --- | --- |
+| **Client** (no upload) | `< 20` files **and** `< 32 MB` total | **None.** No sign-in UI on the homepage. |
+| **Heavy** (Blob + Workflow) | `≥ 20` files **or** `≥ 32 MB`, or `?spikeHeavy=1` | **Better Auth magic link** (Resend) before Blob upload / Workflow start |
 
-20 files / 32 MB is conservative for mid-range Android. Desktop still uses the client path below the line. Above the line, Combine **refuses** to run in-browser even if Blob is missing — a clear error instead of a crash.
+20 files / 32 MB is conservative for mid-range Android. Soft copy from 15 files / 24 MB: “Large jobs need a quick email sign-in.” The email field mounts only after the job is actually heavy (or Combine is pressed on a heavy job).
 
-## Prototype architecture
+## Architecture
 
 ```
 phone                    Vercel                         Blob (pdf-combine-blob)
 ─────                    ──────                         ────
-batch upload (2 at a time) ──► handleUpload token ──► private jobs/{id}/sources/*
-POST /api/merge/start ──► Workflow mergePdfsWorkflow
+small job: pdf-lib in tab (anonymous)
+heavy job: magic link → session cookie
+batch upload (2 at a time) ──► handleUpload (session) ──► private jobs/{id}/sources/*
+POST /api/merge/start (session + owner.json)
+                          Workflow mergePdfsWorkflow
                           step: merge 8 files, write tmp PDF, drop sources
-                          step: … until combined.pdf
-                          start cleanup workflow (sleep 1 hour → delete prefix)
-poll GET /api/merge/{runId}  (progress.json + run.status)
-GET /api/merge/download?jobId=  → stream combined.pdf, delete ~15s later
+poll GET /api/merge/{runId}  (session)
+GET /api/merge/download?jobId=  (session) → stream, delete ~15s later
+cleanup workflow: sleep 1 hour → list+del prefix
 ```
 
-- Uploads never go through the Next.js body (Blob client upload).
-- Merge is **not** one serverless timeout: `HEAVY_MERGE_CHUNK_SIZE = 8` files per `"use step"`.
-- Progress is a private `progress.json` blob (polling-friendly on mobile).
-- Workflows also write the default stream for `npx workflow web`.
+- Light users never hit `/api/blob` or `/api/auth` UI.
+- Upload, start, poll, and download require a validated Better Auth session (not a cookie-existence check).
+- `jobs/{id}/owner.json` binds the prefix to the user id.
 
-## Live results (after Blob was connected)
+## Auth (Brice)
 
-Store: **pdf-combine-blob** (`store_hSXUsRUrLNOmzqZt`) on project **pdf-combine**. `BLOB_READ_WRITE_TOKEN` is set for Development, Preview, and Production.
+- **Better Auth** + **email magic links** via **Resend**.
+- Persist users/sessions in **Neon Postgres**.
+- shadcn/Maia for the email field and “check your email” state.
+- No OAuth. No Trigger.dev.
 
-Preview (`GET /api/merge/health`) returned `{ "enabled": true }`.
+Neon: Vercel-managed org listed existing projects (hoverslam, apartments, …) but **create project is blocked** (`organization is managed by Vercel`). Ship/Brice: Vercel Storage → Neon database named `pdf-combine`, then `DATABASE_URL` + `npm run db:migrate`.
 
-Against that preview we ran `scripts/smoke-heavy-merge.ts` (empty 1-page PDFs, client upload → workflow → download):
+Resend: verify `pdf.briceduke.dev` (or the sending domain), set `RESEND_FROM_EMAIL` to an address on that domain (`PDF Combine <auth@pdf.briceduke.dev>`). Not `onboarding@resend.dev` in production.
+
+`BETTER_AUTH_URL` on **Production only** (`https://pdf.briceduke.dev`). Preview uses `VERCEL_URL`.
+
+## Live Blob smokes (before auth gate)
+
+Store: **pdf-combine-blob** (`store_hSXUsRUrLNOmzqZt`). Empty 1-page PDFs against an earlier preview:
 
 | Files | Workflow run | Result | Wall time |
 | --- | --- | --- | --- |
@@ -57,9 +60,7 @@ Against that preview we ran `scripts/smoke-heavy-merge.ts` (empty 1-page PDFs, c
 | 24 | `wrun_01M2G6Y7BNEAAY1APPXP3NGNX2` | 24 pages (3 merge steps) | ~13s |
 | 48 | `wrun_01M2G6Z98WQ3Z90MX0XB9TQZ9N` | 48 pages (6 merge steps) | ~32s |
 
-Runtime logs show `/api/blob/upload`, `/api/merge/start`, `/.well-known/workflow/v1/step` + `flow`, poll, and `/api/merge/download` all 200. Chunked steps are real, not one giant function.
-
-Not yet live: a **Samsung Chrome** run with ~395 *real* files (upload bandwidth + pdf-lib memory on scanned pages). Empty 395-file jobs should follow the same step loop (~50 steps of 8).
+Those runs were **unsigned**. After this change they must 401 without `SPIKE_COOKIE`.
 
 ## Limits
 
@@ -67,62 +68,54 @@ Not yet live: a **Samsung Chrome** run with ~395 *real* files (upload bandwidth 
 | --- | --- | --- |
 | Client file count | 20 | Below this, sequential pdf-lib + yield is the default |
 | Client total size | 32 MB | Phones still OOM if each file is huge |
-| Heavy file cap (schema) | 500 | Covers the 395-file Samsung target |
+| Soft warning | 15 files / 24 MB | Copy only; still anonymous |
+| Heavy file cap | 500 | Covers the 395-file Samsung target |
+| Heavy per-file cap | 80 MB | Enforced on the Blob client token |
 | Upload concurrency | 2 | UI path; smoke script is sequential |
 | Files per workflow step | 8 | 48 files = 6 steps, all succeeded |
-| Step timeout | 300s | `vercel.json` + platform default |
-| Blob client upload | `BLOB_READ_WRITE_TOKEN` | Confirmed required; OIDC is not enough for `handleUpload` |
-| Result TTL | 1 hour | Cleanup workflow `sleep("1 hour")` then `list+del` prefix |
+| Result TTL | 1 hour | Cleanup workflow then `list+del` |
 | Download cleanup | ~15s after stream | Avoids deleting while the PDF is still downloading |
-| pdf-lib on the server | still in-memory | Empty PDFs are cheap; 395 full-page scans may still OOM a step |
-| Auth | **none** | UUID job prefix only. Production must add auth |
-| Thumbnails | lazy, 96px, canvas edge ≤ 2048 | Never pre-render 395 first pages |
+| List | virtualized | `@tanstack/react-virtual`, ~88px rows, dnd-kit reorder via pointer delta |
+| Thumbnails | lazy, skipped on heavy | Never pre-render 395 first pages |
+| Auth | magic link on heavy only | Session checked in route handlers |
 
-## Go / no-go
+## Env (no invented secrets)
 
-| Option | Verdict |
-| --- | --- |
-| Stay **client-only** for 395 Samsung files | **No-go.** The tab will freeze and die. |
-| **Hybrid: client + Vercel Workflows + private Blob** | **Go** for the 395-file *architecture*. Live preview proved 48-file durable merge + download. Remaining risk is large scanned PDFs (pdf-lib memory) and phone upload UX, not “can Workflows merge many files.” |
-| Ship this PR as production | **Not yet.** No upload auth, list not virtualized, no per-file size cap. |
+See README for the full table. Ship/Brice still needs to set:
 
-## Env vars (no Trigger keys)
+- `DATABASE_URL` (Neon pooled)
+- `BETTER_AUTH_SECRET`
+- `BETTER_AUTH_URL` (Production only)
+- `RESEND_API_KEY`
+- `RESEND_FROM_EMAIL` (verified domain)
 
-| Variable | Required for | Status |
-| --- | --- | --- |
-| `BLOB_READ_WRITE_TOKEN` | Browser uploads (`handleUpload`) | Set on Dev / Preview / Production |
-| `BLOB_STORE_ID` | Server `get`/`put` with OIDC | Store `store_hSXUsRUrLNOmzqZt` |
-| `VERCEL_OIDC_TOKEN` | Workflows + Blob on Vercel | Automatic on deploy |
-
-Not used: `TRIGGER_SECRET_KEY`.
-
-Local: `vercel env pull .env.local --yes` (include Development on the store connection).
+Already set: `BLOB_READ_WRITE_TOKEN`, `BLOB_STORE_ID`, `VERCEL_OIDC_TOKEN`.
 
 ## How to smoke
 
-### Small client job
+### Small client job (must stay anonymous)
 
 ```bash
-npm install
 npm run dev
 ```
 
-Open http://localhost:3000. Add 2–3 PDFs. Network should show **no** `/api/blob`. Progress should tick.
+Open http://localhost:3000. Add 2–3 PDFs. No sign-in form. Network should show **no** `/api/blob`.
 
-### Heavy job on the preview (Blob is live)
+### Heavy job (after Neon + Resend + migrate)
+
+1. Open the preview, add 21 PDFs (or `/?spikeHeavy=1`).
+2. Magic-link form appears. Sign in.
+3. Combine, leave the tab in the foreground.
 
 ```bash
-SPIKE_BASE_URL="https://<preview>.vercel.app" SPIKE_FILE_COUNT=24 npm run smoke:heavy
+SPIKE_BASE_URL="https://<preview>.vercel.app" \
+SPIKE_COOKIE="better-auth.session_token=..." \
+SPIKE_FILE_COUNT=24 \
+npm run smoke:heavy
 ```
 
-Or in the UI: open `/?spikeHeavy=1`, add two PDFs, Combine. Copy says files upload temporarily then delete.
+## Remaining for Samsung ~395
 
-Phone (Samsung): add many files (or 21+ so the Heavy badge shows), Combine, leave the tab in the foreground while it uploads and polls. The phone should not rasterize every thumbnail.
-
-## Recommended follow-ups (not this PR)
-
-- Sign job ids so anonymous clients cannot upload into arbitrary prefixes.
-- Virtualize the sortable list at hundreds of rows.
-- Cap per-file and total Blob size.
-- If scanned 395-pagers OOM pdf-lib in a step, smaller chunks or a streaming merge tool.
-- Real auth before any public deploy of the upload route.
+- Wire Neon + Resend + migrate on the Vercel project.
+- Sign in on a phone, upload ~395 real files (bandwidth + pdf-lib memory on scanned pages).
+- If a step OOMs on scanned pages, shrink `HEAVY_MERGE_CHUNK_SIZE` or change the merge tool.

@@ -1,5 +1,9 @@
 export const CLIENT_MAX_FILE_COUNT = 20
 export const CLIENT_MAX_TOTAL_BYTES = 32 * 1024 * 1024
+export const CLIENT_SOFT_FILE_COUNT = 15
+export const CLIENT_SOFT_TOTAL_BYTES = 24 * 1024 * 1024
+export const HEAVY_MAX_FILE_COUNT = 500
+export const HEAVY_MAX_FILE_BYTES = 80 * 1024 * 1024
 export const HEAVY_UPLOAD_CONCURRENCY = 2
 export const HEAVY_MERGE_CHUNK_SIZE = 8
 export const HEAVY_CLEANUP_DELAY = "1 hour" as const
@@ -70,6 +74,42 @@ export function decideMergePath(
     reason: "Small enough to combine on this device. Files are not uploaded.",
     stats,
   }
+}
+
+/**
+ * True when a job is still on-device but close to the 20-file / 32 MB line.
+ * Soft copy only — never a sign-in wall.
+ *
+ * @param stats - File count and total bytes.
+ * @returns Whether to mention that large jobs need email sign-in.
+ */
+export function isApproachingHeavyLimit(stats: MergeJobStats): boolean {
+  if (stats.fileCount >= CLIENT_MAX_FILE_COUNT) {
+    return false
+  }
+
+  if (stats.totalBytes >= CLIENT_MAX_TOTAL_BYTES) {
+    return false
+  }
+
+  return (
+    stats.fileCount >= CLIENT_SOFT_FILE_COUNT ||
+    stats.totalBytes >= CLIENT_SOFT_TOTAL_BYTES
+  )
+}
+
+/**
+ * Magic-link UI is only for jobs that already need Blob + Workflows.
+ *
+ * @param isHeavy - Merge path is the server path.
+ * @param isSignedIn - Better Auth session present.
+ * @returns Whether to show the sign-in form.
+ */
+export function shouldPromptMagicLink(
+  isHeavy: boolean,
+  isSignedIn: boolean
+): boolean {
+  return isHeavy && !isSignedIn
 }
 
 /**

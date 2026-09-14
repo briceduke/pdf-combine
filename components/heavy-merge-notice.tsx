@@ -7,35 +7,66 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { CLIENT_MAX_FILE_COUNT } from "@/lib/merge-limits"
 
 export function HeavyMergeNotice({
-  enabled,
+  blobEnabled,
+  authConfigured,
+  isSignedIn,
   fileCount,
 }: {
-  readonly enabled: boolean
+  readonly blobEnabled: boolean
+  readonly authConfigured: boolean
+  readonly isSignedIn: boolean
   readonly fileCount: number
 }) {
-  if (enabled) {
+  if (!blobEnabled) {
+    return (
+      <Alert variant="destructive">
+        <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} />
+        <AlertTitle>Too large for this phone</AlertTitle>
+        <AlertDescription>
+          {fileCount} files would freeze or crash in-browser merge (Samsung / ~395
+          files). Heavy merge needs a Blob store. Combine fewer files until that
+          is configured.
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (!authConfigured) {
+    return (
+      <Alert variant="destructive">
+        <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} />
+        <AlertTitle>Sign-in is not wired</AlertTitle>
+        <AlertDescription>
+          Large jobs upload through Vercel Blob and need Better Auth. Set
+          DATABASE_URL, BETTER_AUTH_SECRET, RESEND_API_KEY, and RESEND_FROM_EMAIL
+          — see README.
+        </AlertDescription>
+      </Alert>
+    )
+  }
+
+  if (!isSignedIn) {
     return (
       <Alert>
         <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} />
-        <AlertTitle>Temporary upload</AlertTitle>
+        <AlertTitle>Sign in to upload</AlertTitle>
         <AlertDescription>
           This job is over the on-device limit ({CLIENT_MAX_FILE_COUNT} files or
-          32 MB). Files upload to private Vercel Blob, merge on Vercel
-          Workflows, then delete after download or within 1 hour. They are not
-          kept.
+          32 MB). Email a magic link to upload privately, merge on Vercel
+          Workflows, then delete after download or within 1 hour.
         </AlertDescription>
       </Alert>
     )
   }
 
   return (
-    <Alert variant="destructive">
+    <Alert>
       <HugeiconsIcon icon={InformationCircleIcon} strokeWidth={2} />
-      <AlertTitle>Too large for this phone</AlertTitle>
+      <AlertTitle>Temporary upload</AlertTitle>
       <AlertDescription>
-        {fileCount} files would freeze or crash in-browser merge (Samsung / ~395
-        files). Heavy merge needs a Blob store — see SPIKE.md. Combine fewer
-        files until that is configured.
+        This job is over the on-device limit ({CLIENT_MAX_FILE_COUNT} files or 32
+        MB). Files upload to private Vercel Blob, merge on Vercel Workflows, then
+        delete after download or within 1 hour. They are not kept.
       </AlertDescription>
     </Alert>
   )
