@@ -16,7 +16,8 @@ const fontMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PDF Combine",
-  description: "Combine PDFs in your browser. Files never leave your device.",
+  description:
+    "Combine PDFs in your browser. Small jobs never leave the device. Large jobs need a one-time email sign-in.",
 }
 
 export default function RootLayout({

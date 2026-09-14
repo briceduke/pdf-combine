@@ -1,5 +1,4 @@
-"use client"
-
+import { Suspense } from "react"
 import Link from "next/link"
 import { Pdf01Icon } from "@hugeicons/core-free-icons"
 import { HugeiconsIcon } from "@hugeicons/react"
@@ -23,7 +22,9 @@ export default function Page() {
           </div>
           PDF Combine
         </Link>
-        <PdfCombineForm />
+        <Suspense fallback={null}>
+          <PdfCombineForm />
+        </Suspense>
       </div>
     </div>
   )

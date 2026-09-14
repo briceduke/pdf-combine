@@ -10,6 +10,11 @@ import {
 import { HugeiconsIcon } from "@hugeicons/react"
 import { toast } from "sonner"
 
+import {
+  HeavyAuthPanel,
+  type HeavyAuthSession,
+} from "@/components/heavy-auth-panel"
+import { HeavyMergeNotice } from "@/components/heavy-merge-notice"
 import { PdfPreviewDialog } from "@/components/pdf-preview-dialog"
 import { SortablePdfList } from "@/components/sortable-pdf-list"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -40,9 +45,29 @@ import {
 import { Input } from "@/components/ui/input"
 import { Progress } from "@/components/ui/progress"
 import { Spinner } from "@/components/ui/spinner"
+import { useSearchParams } from "next/navigation"
 import { downloadPdfBytes } from "@/lib/download-pdf"
+import { canStartHeavyCombine } from "@/lib/heavy-combine-gate"
+import {
+  downloadHeavyMerge,
+  fetchMergeHealth,
+  runHeavyMerge,
+  type MergeHealth,
+} from "@/lib/heavy-merge-client"
+import {
+  decideMergePath,
+  describeMergeError,
+  isApproachingHeavyLimit,
+  measureMergeJob,
+  shouldPromptMagicLink,
+} from "@/lib/merge-limits"
 import { mergePdfFiles } from "@/lib/merge-pdfs"
 import { createPdfItems, splitPdfFiles, type PdfItem } from "@/lib/pdf-files"
+import {
+  heavyProgressPercent,
+  type HeavyMergeProgress,
+} from "@/lib/pdf-job"
+import { tryCatch } from "@/lib/try-catch"
 import { cn } from "@/lib/utils"
 
 interface FilePreview {
@@ -57,6 +82,41 @@ interface MergedPreview {
 
 type ActivePreview = FilePreview | MergedPreview | null
 
+const EMPTY_HEALTH: MergeHealth = {
+  enabled: false,
+  authConfigured: false,
+  emailConfigured: false,
+}
+
+function dropzoneHint(isApproaching: boolean): string {
+  if (isApproaching) {
+    return "Large jobs need a quick email sign-in. Small jobs stay on this device. Press D to toggle dark mode."
+  }
+
+  return "Files stay in this browser unless a job is over 20 files or 32 MB. Press D to toggle dark mode."
+}
+
+function combineHint(input: {
+  readonly fileCount: number
+  readonly isHeavy: boolean
+  readonly needsSignIn: boolean
+  readonly reason: string
+}): string {
+  if (input.fileCount < 2) {
+    return "Add at least two PDFs to combine."
+  }
+
+  if (input.needsSignIn) {
+    return "Sign in with the email link to upload this job. Small jobs on this device do not need an account."
+  }
+
+  if (input.isHeavy) {
+    return input.reason
+  }
+
+  return `Ready to merge ${input.fileCount} files into combined.pdf on this device.`
+}
+
 export function PdfCombineForm({
   className,
   ...props
@@ -66,15 +126,45 @@ export function PdfCombineForm({
   const [isDragging, setIsDragging] = React.useState(false)
   const [isCombining, setIsCombining] = React.useState(false)
   const [progress, setProgress] = React.useState(0)
+  const [progressLabel, setProgressLabel] = React.useState("Combining files…")
   const [error, setError] = React.useState<string | null>(null)
   const [preview, setPreview] = React.useState<ActivePreview>(null)
   const [mergedBytes, setMergedBytes] = React.useState<Uint8Array | null>(null)
+  const searchParams = useSearchParams()
+  const forceHeavy = searchParams.has("spikeHeavy")
+  const hasAuthError = searchParams.has("authError")
+  const [health, setHealth] = React.useState<MergeHealth>(EMPTY_HEALTH)
+  const [heavyJobId, setHeavyJobId] = React.useState<string | null>(null)
+  const [heavySession, setHeavySession] = React.useState<HeavyAuthSession>({
+    isSignedIn: false,
+    isPending: false,
+  })
+
+  const files = items.map((item) => item.file)
+  const decision = decideMergePath(measureMergeJob(files), forceHeavy)
+  const isHeavy = decision.path === "heavy"
+  const isApproaching = isApproachingHeavyLimit(decision.stats)
+  const needsSignIn = shouldPromptMagicLink(isHeavy, heavySession.isSignedIn)
+  const canRunHeavy = canStartHeavyCombine({
+    blobEnabled: health.enabled,
+    authConfigured: health.authConfigured,
+    isSignedIn: heavySession.isSignedIn,
+  })
+  const isCombineBlocked =
+    items.length < 2 ||
+    isCombining ||
+    (isHeavy && (heavySession.isPending || !canRunHeavy))
+
+  React.useEffect(() => {
+    void fetchMergeHealth().then(setHealth)
+  }, [])
 
   function updateItems(
     updater: PdfItem[] | ((current: PdfItem[]) => PdfItem[])
   ): void {
     setItems(updater)
     setMergedBytes(null)
+    setHeavyJobId(null)
   }
 
   function addFiles(fileList: FileList | File[]): void {
@@ -112,61 +202,86 @@ export function PdfCombineForm({
     addFiles(event.dataTransfer.files)
   }
 
-  async function combineItems(): Promise<Uint8Array> {
+  async function combineOnDevice(): Promise<Uint8Array> {
     if (mergedBytes) {
       return mergedBytes
     }
 
-    const bytes = await mergePdfFiles(
-      items.map((item) => item.file),
-      (done, total) => {
-        setProgress(Math.round((done / total) * 100))
-      }
-    )
+    const bytes = await mergePdfFiles(files, (done, total) => {
+      setProgress(Math.round((done / total) * 100))
+      setProgressLabel(`Combining files… ${done} of ${total}`)
+    })
 
     setMergedBytes(bytes)
     return bytes
   }
 
-  async function runCombine(
-    onSuccess: (bytes: Uint8Array) => void
-  ): Promise<void> {
+  async function combineOnServer(): Promise<void> {
+    const result = await runHeavyMerge(files, (next: HeavyMergeProgress) => {
+      setProgress(heavyProgressPercent(next))
+      setProgressLabel(next.message)
+    })
+
+    setHeavyJobId(result.jobId)
+    downloadHeavyMerge(result.jobId)
+    toast.success(`Combined ${items.length} PDFs on the server.`)
+  }
+
+  async function runCombine(mode: "download" | "preview"): Promise<void> {
     if (items.length < 2 || isCombining) {
       return
     }
 
-    setIsCombining(true)
-    setProgress(mergedBytes ? 100 : 0)
-    setError(null)
-
-    try {
-      onSuccess(await combineItems())
-    } catch (caught) {
+    if (isHeavy && needsSignIn) {
       const message =
-        caught instanceof Error
-          ? caught.message
-          : "Could not combine these PDFs."
+        "Sign in with the email link to upload this job. Small jobs on this device do not need an account."
       setError(message)
       toast.error(message)
-    } finally {
-      setIsCombining(false)
+      return
     }
-  }
 
-  async function handleSubmit(
-    event: React.FormEvent<HTMLFormElement>
-  ): Promise<void> {
-    event.preventDefault()
-    await runCombine((bytes) => {
+    if (isHeavy && !canRunHeavy) {
+      const message = decision.reason
+      setError(message)
+      toast.error(message)
+      return
+    }
+
+    setIsCombining(true)
+    setProgress(mergedBytes && !isHeavy ? 100 : 0)
+    setProgressLabel(isHeavy ? "Starting heavy merge…" : "Combining files…")
+    setError(null)
+
+    const result = await tryCatch(async () => {
+      if (isHeavy) {
+        if (mode === "preview") {
+          throw new Error(
+            "Heavy merge skips in-browser preview. Combine to download combined.pdf."
+          )
+        }
+
+        await combineOnServer()
+        return
+      }
+
+      const bytes = await combineOnDevice()
+
+      if (mode === "preview") {
+        setPreview({ kind: "merged", bytes })
+        return
+      }
+
       downloadPdfBytes(bytes, "combined.pdf")
       toast.success(`Combined ${items.length} PDFs.`)
     })
-  }
 
-  async function handlePreviewCombined(): Promise<void> {
-    await runCombine((bytes) => {
-      setPreview({ kind: "merged", bytes })
-    })
+    if (result.error) {
+      const message = describeMergeError(result.error)
+      setError(message)
+      toast.error(message)
+    }
+
+    setIsCombining(false)
   }
 
   const previewSource =
@@ -183,11 +298,16 @@ export function PdfCombineForm({
           <CardTitle className="text-xl">Combine PDFs</CardTitle>
           <CardDescription>
             Drop files, preview pages, reorder them, then download one PDF.
-            Nothing is uploaded.
+            Small jobs stay on this device — no account.
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              void runCombine("download")
+            }}
+          >
             <FieldGroup>
               <Field>
                 <FieldLabel htmlFor={inputId} className="sr-only">
@@ -233,24 +353,29 @@ export function PdfCombineForm({
                     event.target.value = ""
                   }}
                 />
-                <FieldDescription>
-                  Files stay in this browser. Press D to toggle dark mode.
-                </FieldDescription>
+                <FieldDescription>{dropzoneHint(isApproaching)}</FieldDescription>
               </Field>
               {items.length > 0 ? (
                 <Field>
                   <FieldLabel>
                     Order
                     <Badge variant="secondary">{items.length}</Badge>
+                    {isHeavy ? (
+                      <Badge variant="outline">Heavy</Badge>
+                    ) : (
+                      <Badge variant="outline">On device</Badge>
+                    )}
                   </FieldLabel>
                   <FieldDescription>
-                    Tap a thumbnail to preview pages. Drag the handle to reorder
-                    — the top file is first in the combined PDF.
+                    {isHeavy
+                      ? "Thumbnails are skipped for large jobs. Drag the handle to reorder."
+                      : "Tap a thumbnail to preview pages. Drag the handle to reorder — the top file is first."}
                   </FieldDescription>
                   <SortablePdfList
                     items={items}
                     disabled={isCombining}
                     processing={isCombining}
+                    skipThumbs={isHeavy}
                     onPreview={(item) => {
                       setPreview({ kind: "file", item })
                     }}
@@ -263,6 +388,30 @@ export function PdfCombineForm({
                   />
                 </Field>
               ) : null}
+              {hasAuthError ? (
+                <Alert variant="destructive">
+                  <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} />
+                  <AlertTitle>Sign-in link expired</AlertTitle>
+                  <AlertDescription>
+                    Request a new email link when this job is large enough to
+                    upload. Small on-device merges still do not need an account.
+                  </AlertDescription>
+                </Alert>
+              ) : null}
+              {isHeavy ? (
+                <HeavyMergeNotice
+                  blobEnabled={health.enabled}
+                  authConfigured={health.authConfigured}
+                  isSignedIn={heavySession.isSignedIn}
+                  fileCount={items.length}
+                />
+              ) : null}
+              {isHeavy ? (
+                <HeavyAuthPanel
+                  emailConfigured={health.emailConfigured}
+                  onSessionChange={setHeavySession}
+                />
+              ) : null}
               {error ? (
                 <Alert variant="destructive">
                   <HugeiconsIcon icon={Alert02Icon} strokeWidth={2} />
@@ -274,7 +423,7 @@ export function PdfCombineForm({
                 <Field>
                   <Progress value={progress} aria-label="Combining PDFs" />
                   <FieldDescription>
-                    Combining files… {progress}%
+                    {progressLabel} {progress}%
                   </FieldDescription>
                 </Field>
               ) : null}
@@ -282,7 +431,7 @@ export function PdfCombineForm({
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={items.length < 2 || isCombining}
+                  disabled={isCombineBlocked}
                 >
                   {isCombining ? (
                     <Spinner />
@@ -295,9 +444,9 @@ export function PdfCombineForm({
                   <Button
                     type="button"
                     variant="outline"
-                    disabled={items.length < 2 || isCombining}
+                    disabled={items.length < 2 || isCombining || isHeavy}
                     onClick={() => {
-                      void handlePreviewCombined()
+                      void runCombine("preview")
                     }}
                   >
                     <HugeiconsIcon icon={ViewIcon} strokeWidth={2} />
@@ -311,6 +460,7 @@ export function PdfCombineForm({
                       updateItems([])
                       setPreview(null)
                       setMergedBytes(null)
+                      setHeavyJobId(null)
                       setError(null)
                       setProgress(0)
                     }}
@@ -319,9 +469,12 @@ export function PdfCombineForm({
                   </Button>
                 </ButtonGroup>
                 <FieldDescription>
-                  {items.length < 2
-                    ? "Add at least two PDFs to combine."
-                    : `Ready to merge ${items.length} files into combined.pdf.`}
+                  {combineHint({
+                    fileCount: items.length,
+                    isHeavy,
+                    needsSignIn,
+                    reason: decision.reason,
+                  })}
                 </FieldDescription>
               </Field>
             </FieldGroup>
@@ -329,7 +482,9 @@ export function PdfCombineForm({
         </CardContent>
       </Card>
       <FieldDescription className="px-6 text-center">
-        Private by design — merging runs on your device with pdf-lib.
+        {heavyJobId
+          ? "Heavy merge uploaded files only for this job, then deleted them."
+          : "Private by design — small merges run on your device with pdf-lib. No sign-in."}
       </FieldDescription>
       <PdfPreviewDialog
         open={preview !== null}
