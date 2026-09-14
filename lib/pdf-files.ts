@@ -1,6 +1,6 @@
-export type PdfItem = {
-  id: string
-  file: File
+export interface PdfItem {
+  readonly id: string
+  readonly file: File
 }
 
 export function isPdfFile(file: File) {
@@ -19,6 +19,16 @@ export function formatFileSize(bytes: number) {
   }
 
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
+/**
+ * Format a PDF page count for list and preview copy.
+ *
+ * @param pageCount - Number of pages in the document.
+ * @returns A short label like `1 page` or `12 pages`.
+ */
+export function formatPageCount(pageCount: number): string {
+  return pageCount === 1 ? "1 page" : `${pageCount} pages`
 }
 
 export function createPdfItems(files: File[]) {

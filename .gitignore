@@ -18,6 +18,9 @@
 # production
 /build
 
+# pdf.js worker copied from pdfjs-dist on install
+/public/pdf.worker.min.mjs
+
 # misc
 .DS_Store
 *.pem
